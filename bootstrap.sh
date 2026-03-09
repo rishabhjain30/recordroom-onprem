@@ -32,11 +32,20 @@ if command -v docker &>/dev/null; then
     ok "Docker found: $(docker --version 2>/dev/null | head -1)"
 else
     info "Docker not found. Installing..."
-    if curl -fsSL https://get.docker.com | sudo sh; then
-        ok "Docker installed"
+    if command -v yum &>/dev/null; then
+        # Amazon Linux / RHEL / CentOS
+        sudo yum install -y docker &>/dev/null
+    elif command -v apt-get &>/dev/null; then
+        # Ubuntu / Debian
+        curl -fsSL https://get.docker.com | sudo sh
+    elif command -v dnf &>/dev/null; then
+        # Fedora
+        sudo dnf install -y docker &>/dev/null
     else
-        fatal "Docker installation failed. Install manually: https://docs.docker.com/engine/install/"
+        fatal "Could not install Docker. Install manually: https://docs.docker.com/engine/install/"
     fi
+    command -v docker &>/dev/null || fatal "Docker installation failed. Install manually: https://docs.docker.com/engine/install/"
+    ok "Docker installed"
     sudo systemctl start docker 2>/dev/null || sudo service docker start 2>/dev/null || true
     sudo systemctl enable docker 2>/dev/null || true
     if ! groups | grep -q docker; then
