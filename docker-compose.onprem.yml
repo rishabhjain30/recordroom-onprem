@@ -1,0 +1,123 @@
+services:
+  # ---- Database (only when using built-in Postgres) ----
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["db"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-recordroom}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---- Auth (GoTrue standalone) ----
+  # Note: no depends_on postgres because postgres may be external.
+  # When using built-in DB, start postgres first (install.sh handles ordering).
+  # GoTrue will retry on crash via restart policy.
+  gotrue:
+    image: supabase/auth:v2.187.0
+    restart: unless-stopped
+    environment:
+      GOTRUE_DB_DRIVER: postgres
+      DATABASE_URL: ${GOTRUE_DATABASE_URL}
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost}
+      API_EXTERNAL_URL: ${SITE_URL:-http://localhost}/auth/v1
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_API_HOST: 0.0.0.0
+      PORT: 9999
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9999/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---- Backend API ----
+  backend:
+    image: ghcr.io/rishabhjain30/recordroom-backend:${VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      gotrue:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${BACKEND_DATABASE_URL}
+      SUPABASE_URL: ${SITE_URL:-http://localhost}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      CORS_ORIGINS: ${SITE_URL:-http://localhost}
+      FRONTEND_URL: ${SITE_URL:-http://localhost}
+      ENVIRONMENT: production
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+
+  # ---- Frontend ----
+  frontend:
+    image: ghcr.io/rishabhjain30/recordroom-frontend:${VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${SITE_URL:-http://localhost}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
+      NEXT_PUBLIC_API_URL: ${SITE_URL:-http://localhost}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  # ---- Reverse Proxy ----
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+      gotrue:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # ---- One-shot: Database migrations ----
+  migrate:
+    image: ghcr.io/rishabhjain30/recordroom-backend:${VERSION:-latest}
+    environment:
+      DATABASE_URL: ${BACKEND_DATABASE_URL}
+      SUPABASE_URL: http://localhost
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    entrypoint: ["alembic", "upgrade", "head"]
+    profiles: ["setup"]
+
+volumes:
+  pgdata:
