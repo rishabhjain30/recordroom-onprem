@@ -110,6 +110,20 @@ services:
       start_period: 10s
       retries: 5
 
+  # ---- Sync Worker (background sync & analysis) ----
+  sync-worker:
+    image: ghcr.io/rishabhjain30/recordroom-backend:${VERSION:-latest}
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "app.sync_worker"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${BACKEND_DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+
   # ---- One-shot: Database migrations ----
   migrate:
     image: ghcr.io/rishabhjain30/recordroom-backend:${VERSION:-latest}
