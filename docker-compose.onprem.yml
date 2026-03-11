@@ -82,6 +82,9 @@ services:
       NEXT_PUBLIC_SUPABASE_URL: ${SITE_URL:-http://localhost}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
       NEXT_PUBLIC_API_URL: ${SITE_URL:-http://localhost}
+      # Internal URL for server-side calls (middleware/SSR) — resolves inside Docker network
+      # nginx starts after frontend, but middleware only runs on browser requests (nginx is up by then)
+      SUPABASE_INTERNAL_URL: http://nginx:80
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1"]
       interval: 10s

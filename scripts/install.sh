@@ -51,8 +51,14 @@ preflight() {
     ok "Docker Compose found"
 
     # Disk space (need at least 2GB free)
-    AVAIL_KB=$(df "$PROJECT_DIR" --output=avail | tail -1 | tr -d ' ')
-    AVAIL_GB=$((AVAIL_KB / 1024 / 1024))
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS df reports 512-byte blocks by default
+        AVAIL_BLOCKS=$(df "$PROJECT_DIR" | tail -1 | awk '{print $4}')
+        AVAIL_GB=$((AVAIL_BLOCKS / 2 / 1024 / 1024))
+    else
+        AVAIL_KB=$(df "$PROJECT_DIR" --output=avail | tail -1 | tr -d ' ')
+        AVAIL_GB=$((AVAIL_KB / 1024 / 1024))
+    fi
     if [ "$AVAIL_GB" -lt 2 ]; then
         fatal "Not enough disk space. Need at least 2GB free, have ${AVAIL_GB}GB."
     fi
