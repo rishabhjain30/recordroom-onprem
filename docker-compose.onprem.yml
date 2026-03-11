@@ -71,28 +71,10 @@ services:
       start_period: 15s
       retries: 5
 
-  # ---- Frontend ----
-  frontend:
-    image: ghcr.io/rishabhjain30/recordroom-frontend:${VERSION:-latest}
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-    environment:
-      NEXT_PUBLIC_SUPABASE_URL: ${SITE_URL:-http://localhost}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
-      NEXT_PUBLIC_API_URL: ${SITE_URL:-http://localhost}
-      # Internal URL for server-side calls (middleware/SSR) — resolves inside Docker network
-      # nginx starts after frontend, but middleware only runs on browser requests (nginx is up by then)
-      SUPABASE_INTERNAL_URL: http://nginx:80
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1"]
-      interval: 10s
-      timeout: 5s
-      start_period: 10s
-      retries: 5
-
   # ---- Reverse Proxy ----
+  # nginx starts before frontend so SUPABASE_INTERNAL_URL (http://nginx:80)
+  # is available when frontend middleware runs its first health check.
+  # nginx will 502 on /frontend routes briefly until frontend is ready.
   nginx:
     image: nginx:alpine
     restart: unless-stopped
@@ -105,6 +87,28 @@ services:
       - "${HTTP_PORT:-80}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # ---- Frontend ----
+  # Depends on nginx (not backend) so that SUPABASE_INTERNAL_URL is reachable
+  # when the health check triggers middleware on first request.
+  frontend:
+    image: ghcr.io/rishabhjain30/recordroom-frontend:${VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      nginx:
+        condition: service_started
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${SITE_URL:-http://localhost}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
+      NEXT_PUBLIC_API_URL: ${SITE_URL:-http://localhost}
+      # Internal URL for server-side auth calls — routes through Docker network
+      SUPABASE_INTERNAL_URL: http://nginx:80
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
 
   # ---- One-shot: Database migrations ----
   migrate:
